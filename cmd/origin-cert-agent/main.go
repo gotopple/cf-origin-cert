@@ -66,6 +66,13 @@ func main() {
 }
 
 func Start(c *cli.Context) error {
+	if len(c.String(`origin-api-key`)) <= 0 {
+		log.Fatal("origin-api-key is a required parameter")
+	}
+	if len(c.String(`domain`)) <= 0 {
+		log.Fatal("domain is a required parameter")
+	}
+
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, os.Interrupt)
 
