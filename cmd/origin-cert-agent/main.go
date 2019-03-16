@@ -72,6 +72,13 @@ func Start(c *cli.Context) error {
 	if len(c.String(`domain`)) <= 0 {
 		log.Fatal("domain is a required parameter")
 	}
+	switch c.Int(`ttl`) {
+	case agent.Week:
+	case agent.Month:
+	case agent.Quarter:
+	default:
+		log.Fatal(`invalid value for ttl [7, 30, 90] days`)
+	}
 
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, os.Interrupt)
