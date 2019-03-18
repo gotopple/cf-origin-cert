@@ -87,22 +87,32 @@ func (a *CertAgent) Run(ctx context.Context, domain string) {
 		a.cache = append([]CertKeyPair{CertKeyPair{ID: cert.ID, CertPEM: []byte(cert.Certificate), Key: key}}, a.cache...)
 	}
 
-	cleanup := func() {
+	cleanup := func(all bool) {
 		// It does not make any sense to list all of the known certificates (at Cloudflare)
 		// and prune the old ones. The local agent can only clean up the certs that it knows
 		// about since there may be other agents running.
-		if len(a.cache) > 1 {
+		if all || len(a.cache) > 1 {
+			var wg sync.WaitGroup
 			for i, v := range a.cache {
-				if i == 0 {
+				if !all && i == 0 {
 					continue
 				}
-				_, err := a.api.RevokeOriginCertificate(v.ID)
-				if err != nil {
-					// Not bugsnag, but some other visibility or reporting
-					log.Printf("unable to revoke origin certificate id#%s: %v", err)
-				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, err := a.api.RevokeOriginCertificate(v.ID)
+					if err != nil {
+						// Not bugsnag, but some other visibility or reporting
+						log.Printf("unable to revoke origin certificate id#%s: %v", err)
+					}
+				}()
 			}
-			a.cache = []CertKeyPair{a.cache[0]}
+			if !all {
+				a.cache = []CertKeyPair{a.cache[0]}
+			} else {
+				a.cache = []CertKeyPair{}
+			}
+			wg.Wait()
 		}
 	}
 
@@ -111,12 +121,10 @@ func (a *CertAgent) Run(ctx context.Context, domain string) {
 		select {
 		case <-time.After(a.period):
 			generate()
-			cleanup()
+			cleanup(false)
 		case <-ctx.Done():
-			for _, v := range a.cache {
-				_, _ = a.api.RevokeOriginCertificate(v.ID)
-			}
-			break
+			cleanup(true)
+			return
 		}
 	}
 }
