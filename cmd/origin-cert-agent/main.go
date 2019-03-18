@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io/ioutil"
 	"log"
 	"os"
@@ -87,8 +88,8 @@ func Start(c *cli.Context) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stopper := make(chan struct{})
-	go ca.Run(c.String(`domain`), stopper)
+	ctx, cancel := context.WithCancel(context.Background())
+	go ca.Run(ctx, c.String(`domain`))
 	var lastID string
 	for {
 		select {
@@ -122,7 +123,7 @@ func Start(c *cli.Context) error {
 				// bugsnag report?
 				log.Printf("unable to clean up key file for revoked: %x", err)
 			}
-			close(stopper)
+			cancel()
 			time.Sleep(ShortTick)
 			os.Exit(127)
 		}

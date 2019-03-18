@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -58,7 +59,7 @@ func NewCertAgent(apiKey string, period time.Duration, validity int) (*CertAgent
 	}, nil
 }
 
-func (a *CertAgent) Run(domain string, stop chan struct{}) {
+func (a *CertAgent) Run(ctx context.Context, domain string) {
 	a.Lock()
 	defer a.Unlock()
 	subject := fmt.Sprintf("*.%s", domain)
@@ -111,7 +112,7 @@ func (a *CertAgent) Run(domain string, stop chan struct{}) {
 		case <-time.After(a.period):
 			generate()
 			cleanup()
-		case <-stop:
+		case <-ctx.Done():
 			for _, v := range a.cache {
 				_, _ = a.api.RevokeOriginCertificate(v.ID)
 			}
