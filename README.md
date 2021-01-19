@@ -31,6 +31,7 @@ GLOBAL OPTIONS:
    --domain value, -n value              The tld [$CF_ORIGIN_TLD]
    --certout value, -c value             Certificate output file name (default: "./cert.pem") [$CF_ORIGIN_CERT_OUT_FILE]
    --keyout value, -k value              Private key output file name (default: "./key.pem") [$CF_ORIGIN_KEY_OUT_FILE]
+   --post-hook value, --ph value         Post hook [$CF_ORIGIN_POST_HOOK]
    --help, -h                            show help
    --version, -v                         print the version
 ```

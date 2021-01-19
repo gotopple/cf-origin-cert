@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/gotopple/cf-origin-cert/pkg/observer"
 	"log"
 	"os"
 	"sync"
@@ -25,6 +26,8 @@ type CertKeyPair struct {
 }
 type CertAgent struct {
 	sync.Mutex
+	*observer.Observable
+	writer    CertificateWriter
 	apiKey    string
 	period    time.Duration
 	validity  int
@@ -33,7 +36,7 @@ type CertAgent struct {
 	cache     []CertKeyPair
 }
 
-func NewCertAgent(apiKey string, period time.Duration, validity int) (*CertAgent, error) {
+func NewCertAgent(apiKey string, period time.Duration, validity int, writer CertificateWriter) (*CertAgent, error) {
 	switch validity {
 	case Week:
 	case Month:
@@ -49,14 +52,18 @@ func NewCertAgent(apiKey string, period time.Duration, validity int) (*CertAgent
 	}
 
 	generator := SHA256RSAGenerator{}
-	return &CertAgent{
-		apiKey:    apiKey,
-		period:    period,
-		validity:  validity,
-		api:       api,
-		generator: generator,
-		cache:     []CertKeyPair{},
-	}, nil
+	agent := &CertAgent{
+		Observable: observer.MakeObservable(),
+		writer:     writer,
+		apiKey:     apiKey,
+		period:     period,
+		validity:   validity,
+		api:        api,
+		generator:  generator,
+		cache:      []CertKeyPair{},
+	}
+
+	return agent, nil
 }
 
 func (a *CertAgent) Run(ctx context.Context, domain string) {
@@ -65,7 +72,7 @@ func (a *CertAgent) Run(ctx context.Context, domain string) {
 	subject := fmt.Sprintf("*.%s", domain)
 	dnsNames := []string{domain, subject}
 
-	generate := func() {
+	generateAndWrite := func() *CertKeyPair {
 		key, pem, err := a.generator.GenerateNewPEM(subject, dnsNames)
 		if err != nil {
 			log.Fatal(err)
@@ -83,8 +90,13 @@ func (a *CertAgent) Run(ctx context.Context, domain string) {
 			log.Fatal(err)
 		}
 
+		result := CertKeyPair{ID: cert.ID, CertPEM: []byte(cert.Certificate), Key: key}
+		a.writer.Write(&result)
+
 		// prepend to cache
-		a.cache = append([]CertKeyPair{CertKeyPair{ID: cert.ID, CertPEM: []byte(cert.Certificate), Key: key}}, a.cache...)
+		a.cache = append([]CertKeyPair{result}, a.cache...)
+
+		return &result
 	}
 
 	cleanup := func(all bool) {
@@ -116,12 +128,16 @@ func (a *CertAgent) Run(ctx context.Context, domain string) {
 		}
 	}
 
-	generate()
+	initialCert := generateAndWrite()
+	a.Notify(initialCert)
+
 	for {
 		select {
 		case <-time.After(a.period):
-			generate()
+			newCert := generateAndWrite()
 			cleanup(false)
+
+			a.Notify(newCert)
 		case <-ctx.Done():
 			cleanup(true)
 			return
