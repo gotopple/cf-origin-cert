@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -58,6 +57,12 @@ func main() {
 			Value:  `./key.pem`,
 			EnvVar: "CF_ORIGIN_KEY_OUT_FILE",
 		},
+		cli.StringFlag{
+			Name:   "post-hook, ph",
+			Usage:  "Post hook",
+			Value:  "",
+			EnvVar: "CF_ORIGIN_POST_HOOK",
+		},
 	}
 	app.Action = Start
 
@@ -66,7 +71,7 @@ func main() {
 	}
 }
 
-func Start(c *cli.Context) error {
+func Start(c *cli.Context) {
 	if len(c.String(`origin-api-key`)) <= 0 {
 		log.Fatal("origin-api-key is a required parameter")
 	}
@@ -84,48 +89,37 @@ func Start(c *cli.Context) error {
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, os.Interrupt)
 
-	ca, err := agent.NewCertAgent(c.String(`origin-api-key`), c.Duration(`rotation-frequency`), c.Int(`ttl`))
+	ca, err := agent.NewCertAgent(
+		c.String(`origin-api-key`),
+		c.Duration(`rotation-frequency`),
+		c.Int(`ttl`),
+		agent.NewFilesystemCertificateWriter(c.String("certout"), c.String("keyout")),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	postHook := c.String("post-hook")
+	if postHook != "" {
+		ca.Attach(agent.NewPostHookObserver(postHook))
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go ca.Run(ctx, c.String(`domain`))
-	var lastID string
-	for {
-		select {
-		case <-time.After(5 * time.Second):
-			creds, err := ca.GetCertKeyPair(0)
-			if creds.ID == lastID {
-				continue
-			}
-			lastID = creds.ID
-			if err != nil {
-				log.Print(err)
-				continue
-			}
-			err = ioutil.WriteFile(c.String(`certout`), creds.CertPEM, 0600)
-			if err != nil {
-				log.Printf("unable to write certificate file: %x", err)
-			}
-			err = ioutil.WriteFile(c.String(`keyout`), creds.Key, 0600)
-			if err != nil {
-				log.Printf("unable to write key file: %x", err)
-			}
 
-		case <-sigchan:
-			err = os.Remove(c.String(`certout`))
-			if err != nil {
-				// bugsnag report?
-				log.Printf("unable to clean up revoked certificate file: %x", err)
-			}
-			err = os.Remove(c.String(`keyout`))
-			if err != nil {
-				// bugsnag report?
-				log.Printf("unable to clean up key file for revoked: %x", err)
-			}
-			cancel()
-			time.Sleep(ShortTick)
-			os.Exit(127)
-		}
+	<-sigchan
+
+	err = os.Remove(c.String(`certout`))
+	if err != nil {
+		// bugsnag report?
+		log.Printf("unable to clean up revoked certificate file: %x", err)
 	}
+	err = os.Remove(c.String(`keyout`))
+	if err != nil {
+		// bugsnag report?
+		log.Printf("unable to clean up key file for revoked: %x", err)
+	}
+	cancel()
+	time.Sleep(ShortTick)
+	os.Exit(127)
 }
